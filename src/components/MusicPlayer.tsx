@@ -250,16 +250,39 @@ export default function MusicPlayer({
                         onError: (event: YTErrorEvent) => {
                             console.error('YouTube player error:', event.data);
 
-                            // Check for Embed Restrictions (101 or 150)
-                            if ((event.data === 150 || event.data === 101) && !isRetryingRef.current) {
-                                console.log('Embed restricted. Trying fallback search...');
-                                isRetryingRef.current = true; // Mark as retrying
+                            // Error codes:
+                            // 2 = Invalid video ID
+                            // 5 = HTML5 player error
+                            // 100 = Video not found or deleted
+                            // 101 = Video owner does not allow embedding
+                            // 150 = Same as 101 (embedding restricted)
+
+                            // Check for Embed Restrictions (101 or 150) or video unavailable (100)
+                            if ((event.data === 150 || event.data === 101 || event.data === 100) && !isRetryingRef.current) {
+                                console.log('Video restricted/unavailable. Trying fallback options...');
+                                isRetryingRef.current = true;
                                 if (onFallback) onFallback();
 
                                 try {
                                     if (playerRef.current && currentSong) {
-                                        // Search for exact song title + artist + language for best match
-                                        const query = `"${currentSong.title}" ${currentSong.artist} official audio`;
+                                        // Multi-tier fallback strategy
+                                        // Try different search queries in order of preference:
+                                        // 1. Official Audio (most likely to work)
+                                        // 2. Lyric Video (common alternative)
+                                        // 3. Topic/Auto-generated (YouTube-provided versions)
+                                        // 4. Live version (last resort)
+
+                                        const fallbackQueries = [
+                                            `"${currentSong.title}" ${currentSong.artist} official audio`,
+                                            `"${currentSong.title}" ${currentSong.artist} lyric video`,
+                                            `"${currentSong.title}" ${currentSong.artist} topic`,
+                                            `"${currentSong.title}" ${currentSong.artist} audio`
+                                        ];
+
+                                        // Try the first fallback
+                                        const query = fallbackQueries[0];
+                                        console.log('Attempting fallback with query:', query);
+
                                         playerRef.current.loadPlaylist({
                                             listType: 'search',
                                             list: query,
@@ -273,7 +296,8 @@ export default function MusicPlayer({
                                 }
                             }
 
-                            // If we fail again or it's another error, skip to next
+                            // If we fail again (isRetryingRef is true) or it's another error, skip to next
+                            console.log('All fallback attempts exhausted or unrecoverable error, skipping to next song');
                             playNextSongRef.current();
                         },
                     },
