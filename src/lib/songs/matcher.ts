@@ -873,8 +873,8 @@ export async function matchSongsGradient(
         // Interpolate the mood vector
         const currentVector = interpolateVector(startResult.vector, targetVector, t);
 
-        let bestSong: Song | null = null;
-        let bestScore = -Infinity;
+        // Collect scored songs with randomization
+        const scoredCandidates: { song: Song; score: number }[] = [];
 
         for (const song of pool) {
             if (excludeSet.has(song.id)) continue;
@@ -913,18 +913,25 @@ export async function matchSongsGradient(
                 score += 0.3;
             }
 
-            if (score > bestScore) {
-                bestScore = score;
-                bestSong = song;
-            }
+            // ADD RANDOMIZATION FOR VARIETY
+            // Add 0-30% random bonus to introduce variety while preserving quality
+            const randomBonus = Math.random() * 0.3;
+            score += randomBonus;
+
+            scoredCandidates.push({ song, score });
         }
+
+        // Sort by score and pick the best (now includes randomization)
+        scoredCandidates.sort((a, b) => b.score - a.score);
+        const bestSong = scoredCandidates.length > 0 ? scoredCandidates[0].song : null;
+
 
         if (bestSong) {
             excludeSet.add(bestSong.id);
             usedArtists.add(bestSong.artist);
             selectedMatches.push({
                 song: bestSong,
-                score: Math.min(bestScore, 1),
+                score: Math.min(scoredCandidates[0].score, 1),
                 explanation: generateMockExplanation(bestSong, startResult.primaryMood)
             });
         }
