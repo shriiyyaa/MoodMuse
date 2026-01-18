@@ -357,15 +357,16 @@ export async function matchSongs(
     });
 
     // =========================================
-    // ULTRA-AGGRESSIVE RANDOMIZATION: Maximum variety
+    // BALANCED RANDOMIZATION: Quality + Variety
     // =========================================
+    // Add a smaller random bonus to introduce variety while preserving quality
     scoredSongs.forEach(item => {
-        // Add 0-50% random bonus - this is HUGE and ensures very different results each time
-        const randomBonus = Math.random() * 0.5;
+        // Add 0-20% random bonus - enough for variety, small enough to preserve quality ranking
+        const randomBonus = Math.random() * 0.2;
         item.score += randomBonus;
     });
 
-    // Sort by score (highest first) - now includes random variation
+    // Sort by score (highest first) - now includes controlled random variation
     scoredSongs.sort((a, b) => b.score - a.score);
 
     let selected;
@@ -377,11 +378,9 @@ export async function matchSongs(
         const liftProgression = selectLiftProgression(scoredSongs, moodResult, limit, classifySongMood);
         selected = liftProgression;
     } else {
-        // =========================================
-        // FIX: Use ALL SONGS - no limit!
-        // Shuffle the ENTIRE list to give every song a chance
-        // =========================================
-        shuffleArray(scoredSongs);  // Shuffle ALL songs first
+        // Select from top-scored songs with diversity enforcement
+        // No need to shuffle - the random bonus already provides variety
+        // and sorting ensures we get the best matches
         selected = selectDiverseSongs(scoredSongs, limit);
     }
 
