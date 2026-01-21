@@ -9,7 +9,6 @@ import { Song } from '@/lib/songs/types';
 import { ENGLISH_FRESH } from '@/lib/songs/english-fresh';
 import { hindiFreshSongs } from '@/lib/songs/hindi-fresh';
 import { punjabiFreshSongs } from '@/lib/songs/punjabi-fresh';
-import { BLOCKED_YOUTUBE_IDS } from '@/lib/songs/blocklist';
 
 /**
  * Combined song database (Fresh Core)
@@ -19,13 +18,6 @@ const ALL_SONGS_RAW: Song[] = [
     ...hindiFreshSongs,
     ...punjabiFreshSongs
 ];
-
-/**
- * Filter out songs with blocked (non-embeddable) YouTube IDs
- */
-function filterBlockedSongs(songs: Song[]): Song[] {
-    return songs.filter(song => !BLOCKED_YOUTUBE_IDS.has(song.youtubeId || ''));
-}
 
 /**
  * Deduplicate songs by title + artist combination
@@ -49,9 +41,7 @@ let _cachedDatabase: Song[] | null = null;
 
 function getSongDatabase(): Song[] {
     if (_cachedDatabase === null) {
-        // First filter blocked songs, then deduplicate
-        const filtered = filterBlockedSongs(ALL_SONGS_RAW);
-        _cachedDatabase = deduplicateSongs(filtered);
+        _cachedDatabase = deduplicateSongs(ALL_SONGS_RAW);
     }
     return _cachedDatabase;
 }

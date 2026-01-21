@@ -259,40 +259,36 @@ export default function MusicPlayer({
 
                             // Check for Embed Restrictions (101 or 150) or video unavailable (100)
                             if ((event.data === 150 || event.data === 101 || event.data === 100) && !isRetryingRef.current) {
-                                console.log('Video restricted/unavailable. Trying fallback options...');
+                                console.log('Video restricted/unavailable. Calling fallback API...');
                                 isRetryingRef.current = true;
                                 if (onFallback) onFallback();
 
-                                try {
-                                    if (playerRef.current && currentSong) {
-                                        // Multi-tier fallback strategy
-                                        // Try different search queries in order of preference:
-                                        // 1. Official Audio (most likely to work)
-                                        // 2. Lyric Video (common alternative)
-                                        // 3. Topic/Auto-generated (YouTube-provided versions)
-                                        // 4. Live version (last resort)
-
-                                        const fallbackQueries = [
-                                            `"${currentSong.title}" ${currentSong.artist} official audio`,
-                                            `"${currentSong.title}" ${currentSong.artist} lyric video`,
-                                            `"${currentSong.title}" ${currentSong.artist} topic`,
-                                            `"${currentSong.title}" ${currentSong.artist} audio`
-                                        ];
-
-                                        // Try the first fallback
-                                        const query = fallbackQueries[0];
-                                        console.log('Attempting fallback with query:', query);
-
-                                        playerRef.current.loadPlaylist({
-                                            listType: 'search',
-                                            list: query,
-                                            index: 0,
-                                            startSeconds: 0
+                                // Call server-side fallback API to find embeddable alternative
+                                if (currentSong) {
+                                    fetch('/api/youtube/fallback', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            title: currentSong.title,
+                                            artist: currentSong.artist,
+                                            originalId: currentSong.youtubeId
+                                        })
+                                    })
+                                        .then(res => res.json())
+                                        .then(data => {
+                                            if (data.success && data.data?.youtubeId && playerRef.current) {
+                                                console.log('Found alternative video:', data.data.youtubeId);
+                                                playerRef.current.loadVideoById(data.data.youtubeId);
+                                            } else {
+                                                console.log('No alternative found, skipping to next song');
+                                                playNextSongRef.current();
+                                            }
+                                        })
+                                        .catch(err => {
+                                            console.error('Fallback API error:', err);
+                                            playNextSongRef.current();
                                         });
-                                        return;
-                                    }
-                                } catch (e) {
-                                    console.error('Fallback failed:', e);
+                                    return;
                                 }
                             }
 
