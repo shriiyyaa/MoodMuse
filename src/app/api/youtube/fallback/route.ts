@@ -3,7 +3,7 @@
  * 
  * POST /api/youtube/fallback
  * Finds an embeddable alternative video for a song when the primary video is blocked.
- * Uses YouTube's oEmbed endpoint to verify embeddability.
+ * Uses Invidious API (free YouTube proxy) for proper search results.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,6 +12,39 @@ interface FallbackRequest {
     title: string;
     artist: string;
     originalId?: string;
+}
+
+interface InvidiousVideo {
+    videoId: string;
+    title: string;
+    author: string;
+}
+
+// List of public Invidious instances
+const INVIDIOUS_INSTANCES = [
+    'https://inv.nadeko.net',
+    'https://invidious.privacyredirect.com',
+    'https://invidious.lunar.icu',
+];
+
+/**
+ * Search for a video using Invidious API
+ */
+async function searchInvidious(query: string, instance: string): Promise<InvidiousVideo[]> {
+    try {
+        const url = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
+        const response = await fetch(url, {
+            signal: AbortSignal.timeout(5000),
+            headers: { 'Accept': 'application/json' }
+        });
+
+        if (!response.ok) return [];
+
+        const data = await response.json();
+        return data as InvidiousVideo[];
+    } catch {
+        return [];
+    }
 }
 
 /**
@@ -31,42 +64,6 @@ async function isVideoEmbeddable(videoId: string): Promise<boolean> {
 }
 
 /**
- * Search YouTube for a video and return the first result's ID
- * Uses the publicly accessible search endpoint
- */
-async function searchYouTubeVideo(query: string): Promise<string | null> {
-    try {
-        // Use YouTube's search suggest/autocomplete which returns video IDs
-        // This is a workaround that doesn't require an API key
-        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-
-        const response = await fetch(searchUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            },
-            signal: AbortSignal.timeout(5000)
-        });
-
-        if (!response.ok) return null;
-
-        const html = await response.text();
-
-        // Extract video IDs from the search results
-        // YouTube embeds video IDs in the page content
-        const videoIdMatch = html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
-
-        if (videoIdMatch && videoIdMatch[1]) {
-            return videoIdMatch[1];
-        }
-
-        return null;
-    } catch (error) {
-        console.error('YouTube search error:', error);
-        return null;
-    }
-}
-
-/**
  * POST /api/youtube/fallback
  * Find an embeddable alternative for a blocked video
  */
@@ -81,30 +78,49 @@ export async function POST(request: NextRequest) {
             }, { status: 400 });
         }
 
-        // Try different search queries to find an embeddable version
+        // Search queries to try - most specific to least specific
         const searchQueries = [
             `${body.title} ${body.artist} official audio`,
             `${body.title} ${body.artist} audio`,
             `${body.title} ${body.artist} lyrics`,
-            `${body.title} ${body.artist} full song`,
             `${body.title} ${body.artist}`,
         ];
 
-        for (const query of searchQueries) {
-            const videoId = await searchYouTubeVideo(query);
+        // Try each Invidious instance
+        for (const instance of INVIDIOUS_INSTANCES) {
+            for (const query of searchQueries) {
+                try {
+                    const results = await searchInvidious(query, instance);
 
-            if (videoId && videoId !== body.originalId) {
-                // Verify it's embeddable
-                const embeddable = await isVideoEmbeddable(videoId);
+                    // Filter out the original blocked video and check embeddability
+                    for (const video of results.slice(0, 5)) {
+                        if (video.videoId === body.originalId) continue;
 
-                if (embeddable) {
-                    return NextResponse.json({
-                        success: true,
-                        data: {
-                            youtubeId: videoId,
-                            query: query
+                        // Check if video title contains song title (fuzzy match)
+                        const videoTitleLower = video.title.toLowerCase();
+                        const songTitleLower = body.title.toLowerCase();
+
+                        if (!videoTitleLower.includes(songTitleLower.split(' ')[0])) {
+                            continue; // Skip if doesn't match song title
                         }
-                    });
+
+                        // Verify embeddability
+                        const embeddable = await isVideoEmbeddable(video.videoId);
+
+                        if (embeddable) {
+                            return NextResponse.json({
+                                success: true,
+                                data: {
+                                    youtubeId: video.videoId,
+                                    title: video.title,
+                                    author: video.author,
+                                    query: query
+                                }
+                            });
+                        }
+                    }
+                } catch {
+                    continue; // Try next query
                 }
             }
         }
