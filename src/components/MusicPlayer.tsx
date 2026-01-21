@@ -257,43 +257,20 @@ export default function MusicPlayer({
                             // 101 = Video owner does not allow embedding
                             // 150 = Same as 101 (embedding restricted)
 
-                            // Check for Embed Restrictions (101 or 150) or video unavailable (100)
-                            if ((event.data === 150 || event.data === 101 || event.data === 100) && !isRetryingRef.current) {
-                                console.log('Video restricted/unavailable. Calling fallback API...');
-                                isRetryingRef.current = true;
-                                if (onFallback) onFallback();
+                            // For any playback error, skip to next song
+                            if (event.data === 150 || event.data === 101 || event.data === 100 || event.data === 2) {
+                                console.log(`Video unavailable (error ${event.data}), skipping to next song...`);
+                                if (onFallback) onFallback(); // Trigger notification
 
-                                // Call server-side fallback API to find embeddable alternative
-                                if (currentSong) {
-                                    fetch('/api/youtube/fallback', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            title: currentSong.title,
-                                            artist: currentSong.artist,
-                                            originalId: currentSong.youtubeId
-                                        })
-                                    })
-                                        .then(res => res.json())
-                                        .then(data => {
-                                            if (data.success && data.data?.youtubeId && playerRef.current) {
-                                                console.log('Found alternative video:', data.data.youtubeId);
-                                                playerRef.current.loadVideoById(data.data.youtubeId);
-                                            } else {
-                                                console.log('No alternative found, skipping to next song');
-                                                playNextSongRef.current();
-                                            }
-                                        })
-                                        .catch(err => {
-                                            console.error('Fallback API error:', err);
-                                            playNextSongRef.current();
-                                        });
-                                    return;
-                                }
+                                // Small delay before skipping to let the notification show
+                                setTimeout(() => {
+                                    playNextSongRef.current();
+                                }, 500);
+                                return;
                             }
 
-                            // If we fail again (isRetryingRef is true) or it's another error, skip to next
-                            console.log('All fallback attempts exhausted or unrecoverable error, skipping to next song');
+                            // For other errors, also skip
+                            console.log('Playback error, skipping to next song');
                             playNextSongRef.current();
                         },
                     },
