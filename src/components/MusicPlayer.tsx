@@ -107,6 +107,11 @@ export default function MusicPlayer({
     const [isPlayerReady, setIsPlayerReady] = useState(false);
     const [apiLoaded, setApiLoaded] = useState(false);
 
+    // Spotify-like playback controls
+    const [loopMode, setLoopMode] = useState<'off' | 'single' | 'all'>('all');
+    const [isShuffled, setIsShuffled] = useState(false);
+    const [shuffledOrder, setShuffledOrder] = useState<number[]>([]);
+
     const playerRef = useRef<YTPlayer | null>(null);
     const playerContainerRef = useRef<HTMLDivElement>(null);
     const songStartTime = useRef<number>(Date.now());
@@ -115,11 +120,26 @@ export default function MusicPlayer({
     // Use refs to avoid stale closures in YouTube callbacks
     const currentIndexRef = useRef(currentIndex);
     const songsRef = useRef(songs);
+    const loopModeRef = useRef(loopMode);
+    const isShuffledRef = useRef(isShuffled);
+    const shuffledOrderRef = useRef(shuffledOrder);
 
     // Keep refs in sync
     useEffect(() => {
         currentIndexRef.current = currentIndex;
     }, [currentIndex]);
+
+    useEffect(() => {
+        loopModeRef.current = loopMode;
+    }, [loopMode]);
+
+    useEffect(() => {
+        isShuffledRef.current = isShuffled;
+    }, [isShuffled]);
+
+    useEffect(() => {
+        shuffledOrderRef.current = shuffledOrder;
+    }, [shuffledOrder]);
 
     // Sync with external control (when user clicks song in list below)
     useEffect(() => {
@@ -135,23 +155,63 @@ export default function MusicPlayer({
     const currentSong = songs[currentIndex];
 
     // Play next song - uses refs to avoid stale closure
+    // Respects shuffle and loop modes
     const playNextSong = useCallback(() => {
-        const nextIndex = currentIndexRef.current + 1;
         const songsList = songsRef.current;
+        const currentLoop = loopModeRef.current;
+        const shuffled = isShuffledRef.current;
+        const shuffleOrder = shuffledOrderRef.current;
+        const current = currentIndexRef.current;
 
-        // Check if approaching end of playlist
-        if (songsList.length - nextIndex <= 2 && onPlaylistNearEnd) {
-            onPlaylistNearEnd();
+        // Loop Single: replay current song
+        if (currentLoop === 'single') {
+            if (playerRef.current) {
+                try {
+                    playerRef.current.loadVideoById(songsList[current].youtubeId);
+                } catch (e) {
+                    console.error('Failed to replay song:', e);
+                }
+            }
+            return;
         }
 
-        if (nextIndex < songsList.length) {
-            setCurrentIndex(nextIndex);
-            onSongChange?.(nextIndex);
+        let nextIndex: number;
+
+        if (shuffled && shuffleOrder.length > 0) {
+            // Find current position in shuffle order
+            const shufflePos = shuffleOrder.indexOf(current);
+            const nextShufflePos = shufflePos + 1;
+
+            if (nextShufflePos >= shuffleOrder.length) {
+                // End of shuffled playlist
+                if (currentLoop === 'all') {
+                    nextIndex = shuffleOrder[0]; // Loop to start
+                } else {
+                    return; // Loop off: stop
+                }
+            } else {
+                nextIndex = shuffleOrder[nextShufflePos];
+            }
         } else {
-            // Loop back to start
-            setCurrentIndex(0);
-            onSongChange?.(0);
+            // Sequential playback
+            nextIndex = current + 1;
+
+            // Check if approaching end of playlist
+            if (songsList.length - nextIndex <= 2 && onPlaylistNearEnd) {
+                onPlaylistNearEnd();
+            }
+
+            if (nextIndex >= songsList.length) {
+                if (currentLoop === 'all') {
+                    nextIndex = 0; // Loop to start
+                } else {
+                    return; // Loop off: stop
+                }
+            }
         }
+
+        setCurrentIndex(nextIndex);
+        onSongChange?.(nextIndex);
     }, [onSongChange, onPlaylistNearEnd]);
 
     // Handle video ended
@@ -335,6 +395,32 @@ export default function MusicPlayer({
         onIntentSelect(intent);
     }, [onIntentSelect]);
 
+    // Toggle shuffle mode
+    const toggleShuffle = useCallback(() => {
+        if (!isShuffled) {
+            // Create shuffled order (Fisher-Yates algorithm)
+            const order = Array.from({ length: songs.length }, (_, i) => i);
+            for (let i = order.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [order[i], order[j]] = [order[j], order[i]];
+            }
+            // Put current song first in shuffle order
+            const currentPos = order.indexOf(currentIndex);
+            if (currentPos > 0) {
+                [order[0], order[currentPos]] = [order[currentPos], order[0]];
+            }
+            setShuffledOrder(order);
+        }
+        setIsShuffled(prev => !prev);
+    }, [songs.length, isShuffled, currentIndex]);
+
+    // Cycle through loop modes: all -> single -> off -> all
+    const cycleLoopMode = useCallback(() => {
+        setLoopMode(prev =>
+            prev === 'all' ? 'single' : prev === 'single' ? 'off' : 'all'
+        );
+    }, []);
+
     if (!currentSong) return null;
 
     return (
@@ -356,8 +442,20 @@ export default function MusicPlayer({
                         </p>
                     </div>
 
-                    {/* Controls - Smaller */}
-                    <div className="flex items-center gap-2 ml-3">
+                    {/* Controls */}
+                    <div className="flex items-center gap-1 ml-3">
+                        {/* Shuffle Button */}
+                        <button
+                            onClick={toggleShuffle}
+                            className={`p-2 rounded-full transition-all ${isShuffled ? 'text-accent bg-accent/20' : 'hover:bg-white/10 hover:text-accent'}`}
+                            style={{ color: isShuffled ? undefined : 'var(--color-text-secondary)' }}
+                            title={isShuffled ? 'Shuffle On' : 'Shuffle Off'}
+                        >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" />
+                            </svg>
+                        </button>
+                        {/* Previous Button */}
                         <button
                             onClick={playPrevious}
                             className="p-2 hover:bg-white/10 rounded-full transition-all hover:text-accent"
@@ -368,6 +466,7 @@ export default function MusicPlayer({
                                 <path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z" />
                             </svg>
                         </button>
+                        {/* Next Button */}
                         <button
                             onClick={playNext}
                             className="p-2 hover:bg-white/10 rounded-full transition-all hover:text-accent"
@@ -377,6 +476,23 @@ export default function MusicPlayer({
                             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                                 <path d="M11.555 5.168A1 1 0 0010 6v2.798L4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832L10 11.202V14a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4z" />
                             </svg>
+                        </button>
+                        {/* Loop Button */}
+                        <button
+                            onClick={cycleLoopMode}
+                            className={`p-2 rounded-full transition-all ${loopMode !== 'off' ? 'text-accent bg-accent/20' : 'hover:bg-white/10 hover:text-accent'}`}
+                            style={{ color: loopMode === 'off' ? 'var(--color-text-secondary)' : undefined }}
+                            title={loopMode === 'all' ? 'Loop All' : loopMode === 'single' ? 'Loop One' : 'Loop Off'}
+                        >
+                            {loopMode === 'single' ? (
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z" />
+                                </svg>
+                            ) : (
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" />
+                                </svg>
+                            )}
                         </button>
                     </div>
                 </div>
@@ -418,7 +534,8 @@ export default function MusicPlayer({
                         ))}
                     </div>
                 </div>
-            )}
+            )
+            }
 
             {/* Queue - Compact */}
             <div className="max-h-40 overflow-y-auto custom-scrollbar bg-black/5">
@@ -458,6 +575,6 @@ export default function MusicPlayer({
                     </button>
                 ))}
             </div>
-        </div>
+        </div >
     );
 }
